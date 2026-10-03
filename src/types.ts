@@ -1,12 +1,18 @@
 export type QuestionType = 'fill' | 'judge' | 'choice' | 'visual'
 
+export interface ChoiceOption {
+  label: string
+  text: string
+}
+
 export interface AnswerSlot {
   id: string
   answer: string
   x0: number
   x1: number
   width: number
-  kind: QuestionType
+  kind: QuestionType | 'choice_multi'
+  multi?: boolean
 }
 
 export interface BankQuestion {
@@ -17,6 +23,8 @@ export interface BankQuestion {
   plain: string
   section: string
   slots: AnswerSlot[]
+  options?: ChoiceOption[]
+  multi?: boolean
 }
 
 export interface BankPage {

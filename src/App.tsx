@@ -190,7 +190,13 @@ function App() {
   if (!bank) {
     return (
       <main className="loading-screen">
-        <div className="loading-mark">H</div>
+        <div className="loading-mark" aria-hidden="true">
+          <svg viewBox="0 0 64 64" width="34" height="34">
+            <path d="M27 13h10v12l9 20H18l9-20z" fill="#fff" />
+            <path d="M22.5 41h19l3 7H19.5z" fill="#f5b05c" />
+            <circle cx="30" cy="44" r="2.4" fill="#fff" fillOpacity="0.85" />
+          </svg>
+        </div>
         <h1>化学三轮复习</h1>
         <p>{loadError || '正在载入题库与图表...'}</p>
         {loadError && (
@@ -648,36 +654,71 @@ function JudgeInput({ question, answers, submitted, onAnswer }: { question: Quiz
 }
 
 function ChoiceInput({ question, answers, submitted, onAnswer }: { question: QuizQuestion; answers: Record<string, string>; submitted: boolean; onAnswer: (id: string, value: string) => void }) {
-  const optionLetters = Array.from(new Set(question.plain.match(/[A-F](?=[.．、])/g) ?? ['A', 'B', 'C', 'D']))
-  const multiple = question.slots.length === 1 && question.slots[0].answer.length > 1
+  const options = question.options?.length
+    ? question.options
+    : Array.from(new Set(question.plain.match(/[A-F](?=[.．、])/g) ?? ['A', 'B', 'C', 'D'])).map((letter) => ({
+        label: letter,
+        text: '',
+      }))
+  const singleSlot = question.slots.length === 1
+  const hasOptionText = options.some((option) => option.text)
   return (
     <div className="choice-question">
       <div className="prompt-text" dangerouslySetInnerHTML={{ __html: question.promptHtml.replace(/<span class="answer-slot"[^>]*><\/span>/g, '____') }} />
+      {!singleSlot && hasOptionText && (
+        <ul className="choice-legend">
+          {options.map((option) => (
+            <li key={option.label}>
+              <b>{option.label}</b>
+              <span dangerouslySetInnerHTML={{ __html: option.text }} />
+            </li>
+          ))}
+        </ul>
+      )}
       {question.slots.map((slot, slotIndex) => {
-        const selected = (answers[slot.id] ?? '').split('')
+        const multiple = slot.multi ?? question.multi ?? slot.answer.length > 1
+        const selected = (answers[slot.id] ?? '').split('').filter(Boolean)
+        const pick = (letter: string) => {
+          if (!multiple) {
+            onAnswer(slot.id, letter)
+            return
+          }
+          const next = selected.includes(letter)
+            ? selected.filter((item) => item !== letter)
+            : [...selected, letter].sort()
+          onAnswer(slot.id, next.join(''))
+        }
         return (
           <div key={slot.id} className="choice-group">
-            {question.slots.length > 1 && <small>第 {slotIndex + 1} 空</small>}
-            <div className="choice-options">
-              {optionLetters.map((letter) => {
-                const active = selected.includes(letter)
-                return (
+            <small>{singleSlot ? (multiple ? '多选题·至少两个答案' : '单选题') : `第 ${slotIndex + 1} 空`}</small>
+            {singleSlot && hasOptionText ? (
+              <div className="option-list">
+                {options.map((option) => (
                   <button
-                    key={letter}
-                    className={active ? 'active' : ''}
+                    key={option.label}
+                    type="button"
+                    className={`option-row ${selected.includes(option.label) ? 'active' : ''}`}
                     disabled={submitted}
-                    onClick={() => {
-                      if (multiple) {
-                        const next = active ? selected.filter((item) => item !== letter) : [...selected, letter].sort()
-                        onAnswer(slot.id, next.join(''))
-                      } else {
-                        onAnswer(slot.id, letter)
-                      }
-                    }}
-                  >{letter}</button>
-                )
-              })}
-            </div>
+                    onClick={() => pick(option.label)}
+                  >
+                    <span className="option-label">{option.label}</span>
+                    <span className="option-text" dangerouslySetInnerHTML={{ __html: option.text }} />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="choice-options">
+                {options.map((option) => (
+                  <button
+                    key={option.label}
+                    type="button"
+                    className={selected.includes(option.label) ? 'active' : ''}
+                    disabled={submitted}
+                    onClick={() => pick(option.label)}
+                  >{option.label}</button>
+                ))}
+              </div>
+            )}
           </div>
         )
       })}
@@ -692,6 +733,14 @@ function AnswerReview({ question, progressAnswers, autoCorrect }: { question: Qu
     : autoCorrect
       ? '本轮判定：正确'
       : '本轮判定：需要再看一眼'
+  const describeChoice = (value: string) => {
+    const letters = value.split('').filter((item) => /[A-Z]/.test(item))
+    if (question.type !== 'choice' || !question.options?.length || letters.length === 0) return value
+    const texts = letters
+      .map((letter) => question.options?.find((option) => option.label === letter)?.text)
+      .filter((text): text is string => Boolean(text))
+    return `${letters.join('、')}${texts.length ? `（${texts.join('；')}）` : ''}`
+  }
   return (
     <section className={`answer-review ${reviewState}`}>
       <div className="answer-review-title">
@@ -701,12 +750,18 @@ function AnswerReview({ question, progressAnswers, autoCorrect }: { question: Qu
       {question.slots.map((slot, index) => (
         <div key={slot.id} className="answer-line">
           <span>空 {index + 1}</span>
-          <p>你的答案：{progressAnswers[slot.id] || '未填写'}</p>
-          <strong>参考答案：{slot.answer}</strong>
+          <p>你的答案：{progressAnswers[slot.id] ? describeChoice(progressAnswers[slot.id]) : '未填写'}</p>
+          <strong>参考答案：{describeChoice(slot.answer)}</strong>
         </div>
       ))}
       {question.type === 'visual' && <p className="visual-note">请在原答案图中逐项核对，再选择“判对”或“判错”。</p>}
-      <p className="grading-note">填空题按关键词判定；化学式、图表和长答案请以原答案图为准。</p>
+      <p className="grading-note">
+        {question.type === 'choice'
+          ? '选择题按选项字母自动判分；多选题漏选、错选都算错。'
+          : question.type === 'judge'
+            ? '判断题按原答案的 √ / × 自动判分。'
+            : '填空题按关键词判定；化学式、图表和长答案请以原答案图为准。'}
+      </p>
     </section>
   )
 }

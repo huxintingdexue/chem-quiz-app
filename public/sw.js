@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'chem-quiz-v1'
+const CACHE_VERSION = 'chem-quiz-v2'
 const scopeUrl = new URL('./', self.registration.scope)
 const shellUrls = [
   new URL('./', scopeUrl).href,
@@ -6,6 +6,7 @@ const shellUrls = [
   new URL('./manifest.webmanifest', scopeUrl).href,
   new URL('./icons/icon-192.png', scopeUrl).href,
   new URL('./icons/icon-512.png', scopeUrl).href,
+  new URL('./icons/apple-touch-icon.png', scopeUrl).href,
   new URL('./question-bank/bank.json', scopeUrl).href,
 ]
 

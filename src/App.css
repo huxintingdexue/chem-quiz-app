@@ -1008,6 +1008,81 @@ strong {
   color: white;
 }
 
+.choice-legend {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--blue-soft);
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #24352f;
+}
+
+.choice-legend li {
+  display: flex;
+  gap: 8px;
+}
+
+.choice-legend b {
+  color: var(--blue);
+  font-weight: 800;
+}
+
+.option-list {
+  display: grid;
+  gap: 8px;
+}
+
+.option-row {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #202825;
+}
+
+.option-row .option-label {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-weight: 900;
+  font-size: 13px;
+}
+
+.option-row .option-text sub,
+.option-row .option-text sup {
+  font-size: 68%;
+}
+
+.option-row.active {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+}
+
+.option-row.active .option-label {
+  background: var(--blue);
+  color: white;
+}
+
+.option-row:disabled {
+  opacity: 0.72;
+  cursor: default;
+}
+
 .visual-question {
   display: grid;
   justify-items: center;
