@@ -1,0 +1,26 @@
+{
+  "name": "化学三轮复习刷题",
+  "short_name": "化学刷题",
+  "description": "高中化学三轮复习基础知识回归，支持填空、判断、选择与原题截图。",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f4f5f1",
+  "theme_color": "#137a64",
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
