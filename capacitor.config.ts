@@ -5,7 +5,7 @@ const config: CapacitorConfig = {
   appName: '化学三轮复习',
   webDir: 'android-shell',
   server: {
-    url: 'https://guang-ttc.github.io/chem-quiz-app/',
+    url: 'https://huxintingdexue.github.io/chem-quiz-app/',
     cleartext: false,
   },
 };
