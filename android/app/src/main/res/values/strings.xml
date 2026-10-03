@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">化学三轮复习</string>
+    <string name="title_activity_main">化学三轮复习</string>
+    <string name="package_name">com.ttc.chemquiz</string>
+    <string name="custom_url_scheme">com.ttc.chemquiz</string>
+</resources>
