@@ -62,11 +62,6 @@ STEM_OVERRIDES: dict[str, str] = {
     "p01-q007": "6.难溶于水的物质{0}、微溶于水的物质{1}",
 }
 
-# Letter-labelled option lists that the coordinate pass kept as fill blanks.
-LATIN_CHOICE_OVERRIDES: dict[str, list[str]] = {
-    "p20-q002": ["c"],
-}
-
 # Option lists that the coordinate pass dropped together with the stem.
 OPTION_OVERRIDES: dict[str, list[str]] = {
     "p01-q007": [
@@ -493,8 +488,6 @@ def convert_options(question: dict[str, Any]) -> bool:
             raw = overridden[index]
         letters.append(answer_letter(raw, len(items)))
     if not letters or any(letter is None for letter in letters):
-        return False
-    if any(state is None for state in letters):
         return False
     question["options"] = [
         {"label": LATIN[index], "text": body} for index, body in enumerate(items)
