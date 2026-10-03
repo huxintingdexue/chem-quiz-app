@@ -12,6 +12,7 @@ dist
 dist-ssr
 __pycache__
 *.pyc
+artifacts/
 *.local
 
 # Editor directories and files
