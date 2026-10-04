@@ -81,26 +81,35 @@ strong {
   gap: 14px;
   padding: 32px;
   text-align: center;
+  background: #0e9077;
+  color: #fff;
 }
 
 .loading-screen h1 {
   font-size: 26px;
+  color: #fff;
 }
 
 .loading-screen p {
-  color: var(--muted);
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .loading-mark {
-  width: 58px;
-  height: 58px;
+  width: 132px;
+  height: 132px;
   display: grid;
   place-items: center;
-  border-radius: 14px;
-  background: var(--green);
-  color: white;
-  font-size: 30px;
-  font-weight: 800;
+}
+
+.loading-mark svg {
+  width: 100%;
+  height: 100%;
+}
+
+.loading-screen .primary-button {
+  border-color: #fff;
+  background: #fff;
+  color: #0e9077;
 }
 
 .app-shell,

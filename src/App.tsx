@@ -195,7 +195,7 @@ function App() {
     return (
       <main className="loading-screen">
         <div className="loading-mark" aria-hidden="true">
-          <svg viewBox="0 0 64 64" width="34" height="34">
+          <svg viewBox="0 0 64 64">
             <path d="M27 13h10v12l9 20H18l9-20z" fill="#fff" />
             <path d="M22.5 41h19l3 7H19.5z" fill="#f5b05c" />
             <circle cx="30" cy="44" r="2.4" fill="#fff" fillOpacity="0.85" />
