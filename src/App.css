@@ -1177,7 +1177,7 @@ strong {
   background: #fdf8f7;
 }
 
-.answer-review.pending {
+.answer-review.reference {
   border-color: #c8d5cf;
   background: #f7faf8;
 }
@@ -1197,7 +1197,7 @@ strong {
   color: var(--red);
 }
 
-.answer-review.pending .answer-review-title {
+.answer-review.reference .answer-review-title {
   color: var(--green);
 }
 
@@ -1261,33 +1261,36 @@ strong {
   white-space: nowrap;
 }
 
-.grade-actions {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 6px;
-}
-
-.grade-actions button {
+.auto-grade-status {
   min-height: 50px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 6px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--surface);
+  background: #f7f8f5;
+  color: #53605a;
   font-size: 12px;
   font-weight: 800;
 }
 
-.grade-actions button:first-child {
+.auto-grade-status.correct {
+  color: var(--green-dark);
+  border-color: #a9d4c6;
+  background: var(--green-soft);
+}
+
+.auto-grade-status.wrong {
   color: var(--red);
+  border-color: #e4bbb6;
   background: var(--red-soft);
 }
 
-.grade-actions button:last-child {
+.auto-grade-status.reference {
   color: var(--green-dark);
-  background: var(--green-soft);
+  border-color: #c8d5cf;
+  background: #f7faf8;
 }
 
 .image-modal {

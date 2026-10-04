@@ -140,11 +140,6 @@ function App() {
   function submitCurrent() {
     if (!session) return
     const question = session.questions[session.index]
-    if (question.type === 'visual') {
-      setSubmitted(true)
-      setAutoCorrect(null)
-      return
-    }
     const correct = gradeQuestion(question, answers)
     setSubmitted(true)
     setAutoCorrect(correct)
@@ -154,22 +149,6 @@ function App() {
       pageNumber: question.pageNumber,
       correct,
       selfGraded: false,
-      userAnswers: question.slots.map((slot) => answers[slot.id] ?? ''),
-      attemptedAt: Date.now(),
-    })
-  }
-
-  function selfGrade(correct: boolean) {
-    if (!session) return
-    const question = session.questions[session.index]
-    setSubmitted(true)
-    setAutoCorrect(correct)
-    commitRecord({
-      questionId: question.id,
-      chapterId: question.chapterId,
-      pageNumber: question.pageNumber,
-      correct,
-      selfGraded: true,
       userAnswers: question.slots.map((slot) => answers[slot.id] ?? ''),
       attemptedAt: Date.now(),
     })
@@ -224,7 +203,6 @@ function App() {
         bookmarked={progress.bookmarkIds.includes(question.id)}
         onAnswer={(slotId, value) => setAnswers((current) => ({ ...current, [slotId]: value }))}
         onSubmit={submitCurrent}
-        onSelfGrade={selfGrade}
         onToggleBookmark={toggleCurrentBookmark}
         onMove={moveQuestion}
         onClose={closePractice}
@@ -560,7 +538,6 @@ function PracticeScreen({
   bookmarked,
   onAnswer,
   onSubmit,
-  onSelfGrade,
   onToggleBookmark,
   onMove,
   onClose,
@@ -576,7 +553,6 @@ function PracticeScreen({
   bookmarked: boolean
   onAnswer: (slotId: string, value: string) => void
   onSubmit: () => void
-  onSelfGrade: (correct: boolean) => void
   onToggleBookmark: () => void
   onMove: (direction: 1 | -1) => void
   onClose: () => void
@@ -605,7 +581,7 @@ function PracticeScreen({
           <InteractivePrompt question={question} answers={answers} submitted={submitted} onAnswer={onAnswer} />
           <div className="source-actions">
             <button onClick={() => onOpenImage('question')}><ImageIcon size={17} />查看原题</button>
-            {submitted && <button onClick={() => onOpenImage('answer')}><CircleCheck size={17} />原答案</button>}
+            {submitted && <button onClick={() => onOpenImage('answer')}><BookOpenCheck size={17} />原答案</button>}
           </div>
         </section>
         {submitted && <AnswerReview question={question} progressAnswers={answers} autoCorrect={autoCorrect} />}
@@ -616,9 +592,9 @@ function PracticeScreen({
         {!submitted ? (
           <button className="primary-button" disabled={!answerComplete} onClick={onSubmit}><Check size={18} />提交答案</button>
         ) : (
-          <div className="grade-actions">
-            <button onClick={() => onSelfGrade(false)}><CircleX size={17} />判错</button>
-            <button onClick={() => onSelfGrade(true)}><CircleCheck size={17} />判对</button>
+          <div className={`auto-grade-status ${question.type === 'visual' ? 'reference' : autoCorrect ? 'correct' : 'wrong'}`}>
+            {question.type === 'visual' ? <BookOpenCheck size={17} /> : autoCorrect ? <CircleCheck size={17} /> : <CircleX size={17} />}
+            <span>{question.type === 'visual' ? '已展示参考答案' : autoCorrect ? '自动判定：正确' : '自动判定：错误'}</span>
           </div>
         )}
         <button className="secondary-button" disabled={session.index === session.questions.length - 1} onClick={() => onMove(1)}>下一题<ChevronRight size={18} /></button>
@@ -774,12 +750,13 @@ function ChoiceInput({ question, answers, submitted, onAnswer }: { question: Qui
 }
 
 function AnswerReview({ question, progressAnswers, autoCorrect }: { question: QuizQuestion; progressAnswers: Record<string, string>; autoCorrect: boolean | null }) {
-  const reviewState = autoCorrect === null ? 'pending' : autoCorrect ? 'correct' : 'wrong'
-  const title = autoCorrect === null
-    ? '请对照原答案完成自评'
+  const referenceOnly = question.type === 'visual' || autoCorrect === null
+  const reviewState = referenceOnly ? 'reference' : autoCorrect ? 'correct' : 'wrong'
+  const title = referenceOnly
+    ? '参考答案'
     : autoCorrect
-      ? '本轮判定：正确'
-      : '本轮判定：需要再看一眼'
+      ? '回答正确'
+      : '回答错误，参考答案如下'
   const describeChoice = (value: string) => {
     const letters = value.split('').filter((item) => /[A-Z]/.test(item))
     if (question.type !== 'choice' || !question.options?.length || letters.length === 0) return value
@@ -791,7 +768,7 @@ function AnswerReview({ question, progressAnswers, autoCorrect }: { question: Qu
   return (
     <section className={`answer-review ${reviewState}`}>
       <div className="answer-review-title">
-        {autoCorrect === null ? <BookOpenCheck size={22} /> : autoCorrect ? <CircleCheck size={22} /> : <CircleX size={22} />}
+        {referenceOnly ? <BookOpenCheck size={22} /> : autoCorrect ? <CircleCheck size={22} /> : <CircleX size={22} />}
         <strong>{title}</strong>
       </div>
       {question.slots.map((slot, index) => (
@@ -801,9 +778,11 @@ function AnswerReview({ question, progressAnswers, autoCorrect }: { question: Qu
           <strong>参考答案：{describeChoice(slot.answer)}</strong>
         </div>
       ))}
-      {question.type === 'visual' && <p className="visual-note">请在原答案图中逐项核对，再选择“判对”或“判错”。</p>}
+      {question.type === 'visual' && <p className="visual-note">请打开“原答案”图片查看本页完整解析。</p>}
       <p className="grading-note">
-        {question.type === 'choice'
+        {question.type === 'visual'
+          ? '此页以原图核对为主，请结合参考答案复习。'
+          : question.type === 'choice'
           ? '选择题按选项字母自动判分；多选题漏选、错选都算错。'
           : question.type === 'judge'
             ? '判断题按原答案的 √ / × 自动判分。'
