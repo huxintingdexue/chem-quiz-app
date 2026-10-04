@@ -587,16 +587,11 @@ function PracticeScreen({
         {submitted && <AnswerReview question={question} progressAnswers={answers} autoCorrect={autoCorrect} />}
       </main>
 
-      <footer className="practice-footer">
+      <footer className={`practice-footer ${submitted ? 'after-submit' : ''}`}>
         <button className="secondary-button" disabled={session.index === 0} onClick={() => onMove(-1)}><ArrowLeft size={18} />上一题</button>
         {!submitted ? (
           <button className="primary-button" disabled={!answerComplete} onClick={onSubmit}><Check size={18} />提交答案</button>
-        ) : (
-          <div className={`auto-grade-status ${question.type === 'visual' ? 'reference' : autoCorrect ? 'correct' : 'wrong'}`}>
-            {question.type === 'visual' ? <BookOpenCheck size={17} /> : autoCorrect ? <CircleCheck size={17} /> : <CircleX size={17} />}
-            <span>{question.type === 'visual' ? '已展示参考答案' : autoCorrect ? '自动判定：正确' : '自动判定：错误'}</span>
-          </div>
-        )}
+        ) : null}
         <button className="secondary-button" disabled={session.index === session.questions.length - 1} onClick={() => onMove(1)}>下一题<ChevronRight size={18} /></button>
       </footer>
 
