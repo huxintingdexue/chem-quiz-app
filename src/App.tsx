@@ -8,14 +8,20 @@ import {
   ChevronRight,
   CircleCheck,
   CircleX,
+  CloudUpload,
   House,
   Image as ImageIcon,
   Layers3,
   Library,
+  Pencil,
   Play,
   RefreshCcw,
   RotateCcw,
+  Save,
   Shuffle,
+  Trash2,
+  UserPlus,
+  UserRound,
   X,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -26,6 +32,8 @@ import type {
   QuizQuestion,
   QuestionBank,
 } from './types'
+import { escapeHtml, formatChemHtml, formatChemText } from './lib/chemistry'
+import { publishQuestionBank } from './lib/publish'
 import {
   applyAttempt,
   assetUrl,
@@ -37,8 +45,22 @@ import {
   shuffled,
   toggleBookmark,
 } from './lib/quiz'
+import {
+  applyQuestionOverrides,
+  createUser,
+  getInitialUserState,
+  isAdminCode,
+  loadQuestionOverrides,
+  progressStorageKey,
+  saveQuestionOverride,
+  saveUserState,
+  updateQuestionInBank,
+  type UserProfile,
+  type UserRole,
+  type UserState,
+} from './lib/users'
 
-type Tab = 'home' | 'chapters' | 'review' | 'stats'
+type Tab = 'home' | 'chapters' | 'review' | 'stats' | 'profile'
 
 interface PracticeSession {
   title: string
@@ -54,17 +76,28 @@ interface ImageModalState {
 const BLANK_PATTERN = /(<span class="answer-slot" data-blank-id="[^"]+"><\/span>)/g
 const BLANK_ID_PATTERN = /data-blank-id="([^"]+)"/
 
+function hasSlotMarkup(html: string, slotId: string): boolean {
+  return html.includes(`data-blank-id="${slotId}"`)
+}
+
 function App() {
   const [bank, setBank] = useState<QuestionBank | null>(null)
   const [loadedAt, setLoadedAt] = useState<number | null>(null)
   const [loadError, setLoadError] = useState('')
   const [tab, setTab] = useState<Tab>('home')
-  const [progress, setProgress] = useState<QuizProgress>(() => loadProgress())
+  const [userState, setUserState] = useState<UserState>(() => getInitialUserState())
+  const activeUser = userState.users.find((user) => user.id === userState.activeUserId) ?? userState.users[0]
+  const [progress, setProgress] = useState<QuizProgress>(() => loadProgress(progressStorageKey(userState.activeUserId)))
+  const initialQuestionOverrides = useMemo(() => loadQuestionOverrides(), [])
+  const [questionOverrides, setQuestionOverrides] = useState(initialQuestionOverrides)
+  const [githubToken, setGithubToken] = useState(() => localStorage.getItem('chem-quiz-github-token') ?? '')
   const [session, setSession] = useState<PracticeSession | null>(null)
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [submitted, setSubmitted] = useState(false)
   const [autoCorrect, setAutoCorrect] = useState<boolean | null>(null)
   const [imageModal, setImageModal] = useState<ImageModalState | null>(null)
+  const [editingQuestion, setEditingQuestion] = useState<QuizQuestion | null>(null)
+  const [notice, setNotice] = useState('')
   const [chapterSheet, setChapterSheet] = useState<string | null>(null)
   const [reviewMode, setReviewMode] = useState<'wrong' | 'bookmark'>('wrong')
 
@@ -75,15 +108,21 @@ function App() {
         return response.json() as Promise<QuestionBank>
       })
       .then((data) => {
-        setBank(data)
+        setBank(applyQuestionOverrides(data, initialQuestionOverrides))
         setLoadedAt(Date.now())
       })
       .catch((error: unknown) => setLoadError(error instanceof Error ? error.message : '题库加载失败'))
-  }, [])
+  }, [initialQuestionOverrides])
 
   useEffect(() => {
-    saveProgress(progress)
-  }, [progress])
+    saveProgress(progress, progressStorageKey(activeUser.id))
+  }, [activeUser.id, progress])
+
+  useEffect(() => {
+    if (!notice) return
+    const timer = window.setTimeout(() => setNotice(''), 3200)
+    return () => window.clearTimeout(timer)
+  }, [notice])
 
   const questions = useMemo(() => (bank ? flattenQuestions(bank) : []), [bank])
   const questionMap = useMemo(
@@ -170,6 +209,92 @@ function App() {
     setProgress((current) => toggleBookmark(current, question.id))
   }
 
+  function switchUser(userId: string) {
+    if (userId === activeUser.id) return
+    const nextState = { ...userState, activeUserId: userId }
+    saveUserState(nextState)
+    setUserState(nextState)
+    setProgress(loadProgress(progressStorageKey(userId)))
+    setTab('home')
+    setSession(null)
+  }
+
+  function addUser(name: string, role: UserRole = 'student') {
+    const user = createUser(name, role)
+    const nextState = { users: [...userState.users, user], activeUserId: user.id }
+    saveUserState(nextState)
+    setUserState(nextState)
+    setProgress(loadProgress(progressStorageKey(user.id)))
+    setTab('home')
+  }
+
+  function changeUserRole(userId: string, role: UserRole) {
+    const nextState = {
+      ...userState,
+      users: userState.users.map((user) => (user.id === userId ? { ...user, role } : user)),
+    }
+    saveUserState(nextState)
+    setUserState(nextState)
+  }
+
+  function updateGithubToken(value: string) {
+    setGithubToken(value)
+    try {
+      if (value.trim()) localStorage.setItem('chem-quiz-github-token', value.trim())
+      else localStorage.removeItem('chem-quiz-github-token')
+    } catch {
+      // A private browser may reject local storage; the token still works for this session.
+    }
+  }
+
+  function persistQuestionOverride(question: QuizQuestion) {
+    saveQuestionOverride(question)
+    setQuestionOverrides((current) => ({
+      ...current,
+      [question.id]: {
+        id: question.id,
+        type: question.type,
+        contextHtml: question.contextHtml,
+        promptHtml: question.promptHtml,
+        plain: question.plain,
+        section: question.section,
+        slots: question.slots,
+        options: question.options,
+        multi: question.multi,
+      },
+    }))
+  }
+
+  async function saveQuestionChanges(question: QuizQuestion, publish: boolean) {
+    if (!bank) return
+    const nextBank = updateQuestionInBank(bank, question)
+    setBank(nextBank)
+    setSession((current) => current
+      ? {
+          ...current,
+          questions: current.questions.map((item) => (item.id === question.id ? { ...item, ...question } : item)),
+        }
+      : current)
+    persistQuestionOverride(question)
+
+    if (publish) {
+      if (!githubToken.trim()) throw new Error('请先填写 GitHub 同步令牌')
+      await publishQuestionBank(nextBank, githubToken, question.id)
+      setNotice('题目已保存，并已同步给所有用户')
+    } else {
+      setNotice('题目已保存到本机')
+    }
+    setEditingQuestion(null)
+  }
+
+  async function clearLocalQuestionOverrides() {
+    localStorage.removeItem('chem-quiz-question-overrides-v1')
+    setQuestionOverrides({})
+    const response = await fetch(assetUrl('question-bank/bank.json'), { cache: 'no-store' })
+    if (response.ok) setBank(await response.json() as QuestionBank)
+    setNotice('本机题目修正已清除')
+  }
+
   if (!bank) {
     return (
       <main className="loading-screen">
@@ -194,22 +319,36 @@ function App() {
   if (session) {
     const question = session.questions[session.index]
     return (
-      <PracticeScreen
-        session={session}
-        question={question}
-        answers={answers}
-        submitted={submitted}
-        autoCorrect={autoCorrect}
-        bookmarked={progress.bookmarkIds.includes(question.id)}
-        onAnswer={(slotId, value) => setAnswers((current) => ({ ...current, [slotId]: value }))}
-        onSubmit={submitCurrent}
-        onToggleBookmark={toggleCurrentBookmark}
-        onMove={moveQuestion}
-        onClose={closePractice}
-        onOpenImage={(mode) => setImageModal({ question, mode })}
-        imageModal={imageModal}
-        onCloseImage={() => setImageModal(null)}
-      />
+      <>
+        <PracticeScreen
+          session={session}
+          question={question}
+          answers={answers}
+          submitted={submitted}
+          autoCorrect={autoCorrect}
+          bookmarked={progress.bookmarkIds.includes(question.id)}
+          canEdit={activeUser.role === 'admin'}
+          onAnswer={(slotId, value) => setAnswers((current) => ({ ...current, [slotId]: value }))}
+          onSubmit={submitCurrent}
+          onEditQuestion={() => setEditingQuestion(question)}
+          onToggleBookmark={toggleCurrentBookmark}
+          onMove={moveQuestion}
+          onClose={closePractice}
+          onOpenImage={(mode) => setImageModal({ question, mode })}
+          imageModal={imageModal}
+          onCloseImage={() => setImageModal(null)}
+        />
+        {editingQuestion && (
+          <QuestionEditor
+            question={editingQuestion}
+            githubToken={githubToken}
+            onGithubTokenChange={updateGithubToken}
+            onClose={() => setEditingQuestion(null)}
+            onSave={saveQuestionChanges}
+          />
+        )}
+        {notice && <div className="app-toast">{notice}</div>}
+      </>
     )
   }
 
@@ -263,6 +402,19 @@ function App() {
             loadedAt={loadedAt}
           />
         )}
+        {tab === 'profile' && (
+          <ProfileScreen
+            users={userState.users}
+            activeUser={activeUser}
+            overridesCount={Object.keys(questionOverrides).length}
+            githubToken={githubToken}
+            onSwitchUser={switchUser}
+            onAddUser={addUser}
+            onChangeRole={changeUserRole}
+            onGithubTokenChange={updateGithubToken}
+            onClearOverrides={clearLocalQuestionOverrides}
+          />
+        )}
       </main>
 
       <nav className="bottom-nav" aria-label="主导航">
@@ -270,6 +422,7 @@ function App() {
         <NavButton active={tab === 'chapters'} icon={<Library size={21} />} label="章节" onClick={() => setTab('chapters')} />
         <NavButton active={tab === 'review'} icon={<BookOpenCheck size={21} />} label="复习" onClick={() => setTab('review')} />
         <NavButton active={tab === 'stats'} icon={<BarChart3 size={21} />} label="统计" onClick={() => setTab('stats')} />
+        <NavButton active={tab === 'profile'} icon={<UserRound size={21} />} label="用户" onClick={() => setTab('profile')} />
       </nav>
 
       {sheetChapter && (
@@ -294,6 +447,7 @@ function App() {
           }}
         />
       )}
+      {notice && <div className="app-toast">{notice}</div>}
     </div>
   )
 }
@@ -434,7 +588,7 @@ function ReviewScreen({
         {questions.slice(0, 12).map((question) => (
           <article key={question.id}>
             <span className={`type-chip ${question.type}`}>{typeLabel(question.type)}</span>
-            <p>{question.plain.replace(/\{\{blank\}\}/g, '____').slice(0, 70)}</p>
+            <p dangerouslySetInnerHTML={{ __html: formatChemText(question.plain.replace(/\{\{blank\}\}/g, '____').slice(0, 70)) }} />
             <small>{question.chapterTitle} · P{question.pageNumber}</small>
           </article>
         ))}
@@ -536,8 +690,10 @@ function PracticeScreen({
   submitted,
   autoCorrect,
   bookmarked,
+  canEdit,
   onAnswer,
   onSubmit,
+  onEditQuestion,
   onToggleBookmark,
   onMove,
   onClose,
@@ -551,8 +707,10 @@ function PracticeScreen({
   submitted: boolean
   autoCorrect: boolean | null
   bookmarked: boolean
+  canEdit: boolean
   onAnswer: (slotId: string, value: string) => void
   onSubmit: () => void
+  onEditQuestion: () => void
   onToggleBookmark: () => void
   onMove: (direction: 1 | -1) => void
   onClose: () => void
@@ -566,7 +724,10 @@ function PracticeScreen({
       <header className="practice-header">
         <button className="icon-button" onClick={onClose} aria-label="退出练习"><ArrowLeft size={22} /></button>
         <div><strong>{session.title}</strong><small>{session.index + 1} / {session.questions.length} · 第 {question.pageNumber} 页</small></div>
-        <button className={`icon-button ${bookmarked ? 'active' : ''}`} onClick={onToggleBookmark} aria-label="收藏"><Bookmark size={21} fill={bookmarked ? 'currentColor' : 'none'} /></button>
+        <div className="practice-header-actions">
+          {canEdit && <button className="icon-button edit-question-button" onClick={onEditQuestion} aria-label="编辑本题"><Pencil size={19} /></button>}
+          <button className={`icon-button ${bookmarked ? 'active' : ''}`} onClick={onToggleBookmark} aria-label="收藏"><Bookmark size={21} fill={bookmarked ? 'currentColor' : 'none'} /></button>
+        </div>
       </header>
       <div className="progress-line"><i style={{ width: `${((session.index + 1) / session.questions.length) * 100}%` }} /></div>
 
@@ -577,7 +738,7 @@ function PracticeScreen({
             <span>{question.chapterTitle}</span>
             <span>{question.section}</span>
           </div>
-          {question.contextHtml && <div className="question-context" dangerouslySetInnerHTML={{ __html: question.contextHtml }} />}
+          {questionContext(question) && <div className="question-context" dangerouslySetInnerHTML={{ __html: questionContext(question) }} />}
           <InteractivePrompt question={question} answers={answers} submitted={submitted} onAnswer={onAnswer} />
           <div className="source-actions">
             <button onClick={() => onOpenImage('question')}><ImageIcon size={17} />查看原题</button>
@@ -615,7 +776,7 @@ function InteractivePrompt({
     return (
       <div className="visual-question">
         <Layers3 size={28} />
-        <p>{question.plain}</p>
+        <p dangerouslySetInnerHTML={{ __html: formatChemText(question.plain) }} />
       </div>
     )
   }
@@ -624,11 +785,30 @@ function InteractivePrompt({
 
   const parts = question.promptHtml.split(BLANK_PATTERN)
   let blankIndex = 0
+  const slotsEmbedded = question.slots.some((slot) => hasSlotMarkup(question.promptHtml, slot.id))
+  if (!slotsEmbedded) {
+    return (
+      <div className="prompt-text fill-prompt">
+        <span dangerouslySetInnerHTML={{ __html: formatChemHtml(question.promptHtml) }} />
+        {question.slots.map((slot, index) => (
+          <input
+            key={slot.id}
+            className={`inline-answer ${submitted ? 'answered' : ''}`}
+            style={{ width: `${Math.min(180, Math.max(66, slot.width * 1.35))}px` }}
+            value={answers[slot.id] ?? ''}
+            disabled={submitted}
+            placeholder={`空${index + 1}`}
+            onChange={(event) => onAnswer(slot.id, event.target.value)}
+          />
+        ))}
+      </div>
+    )
+  }
   return (
     <div className="prompt-text fill-prompt">
       {parts.map((part, index) => {
         const match = part.match(BLANK_ID_PATTERN)
-        if (!match) return <span key={`${index}-${part}`} dangerouslySetInnerHTML={{ __html: part }} />
+        if (!match) return <span key={`${index}-${part}`} dangerouslySetInnerHTML={{ __html: formatChemHtml(part) }} />
         const slot = question.slots.find((item) => item.id === match[1])
         blankIndex += 1
         if (!slot) return null
@@ -651,22 +831,38 @@ function InteractivePrompt({
 function JudgeInput({ question, answers, submitted, onAnswer }: { question: QuizQuestion; answers: Record<string, string>; submitted: boolean; onAnswer: (id: string, value: string) => void }) {
   const parts = question.promptHtml.split(BLANK_PATTERN)
   let index = 0
+  const unembeddedSlots = question.slots.filter((slot) => !hasSlotMarkup(question.promptHtml, slot.id))
   return (
     <div className="prompt-text judge-prompt">
       {parts.map((part, partIndex) => {
         const match = part.match(BLANK_ID_PATTERN)
-        if (!match) return <span key={`${partIndex}-${part}`} dangerouslySetInnerHTML={{ __html: part }} />
+        if (!match) return <span key={`${partIndex}-${part}`} dangerouslySetInnerHTML={{ __html: formatJudgePromptPart(part) }} />
         const slot = question.slots.find((item) => item.id === match[1])
         if (!slot) return null
         index += 1
         return (
           <span key={slot.id} className="judge-slot">
             <span className="judge-number">{index}</span>
-            <button className={answers[slot.id] === '√' ? 'selected' : ''} disabled={submitted} onClick={() => onAnswer(slot.id, '√')}>√</button>
-            <button className={answers[slot.id] === '×' ? 'selected wrong' : ''} disabled={submitted} onClick={() => onAnswer(slot.id, '×')}>×</button>
+            <button className={answers[slot.id] === '√' ? 'selected' : ''} disabled={submitted} onClick={() => onAnswer(slot.id, '√')}><b>A</b><span>对</span></button>
+            <button className={answers[slot.id] === '×' ? 'selected wrong' : ''} disabled={submitted} onClick={() => onAnswer(slot.id, '×')}><b>B</b><span>错</span></button>
           </span>
         )
       })}
+      {unembeddedSlots.length > 0 && (
+        <span className="judge-slot">
+          {unembeddedSlots.map((slot) => {
+            index += 1
+            const position = index
+            return (
+              <span key={slot.id} className="judge-slot-item" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 8 }}>
+                <span className="judge-number">{position}</span>
+                <button className={answers[slot.id] === '√' ? 'selected' : ''} disabled={submitted} onClick={() => onAnswer(slot.id, '√')}><b>A</b><span>对</span></button>
+                <button className={answers[slot.id] === '×' ? 'selected wrong' : ''} disabled={submitted} onClick={() => onAnswer(slot.id, '×')}><b>B</b><span>错</span></button>
+              </span>
+            )
+          })}
+        </span>
+      )}
     </div>
   )
 }
@@ -682,13 +878,13 @@ function ChoiceInput({ question, answers, submitted, onAnswer }: { question: Qui
   const hasOptionText = options.some((option) => option.text)
   return (
     <div className="choice-question">
-      <div className="prompt-text" dangerouslySetInnerHTML={{ __html: question.promptHtml.replace(/<span class="answer-slot"[^>]*><\/span>/g, '____') }} />
+      <div className="prompt-text" dangerouslySetInnerHTML={{ __html: formatChemHtml(question.promptHtml.replace(/<span class="answer-slot"[^>]*><\/span>/g, '____')) }} />
       {!singleSlot && hasOptionText && (
         <ul className="choice-legend">
           {options.map((option) => (
             <li key={option.label}>
               <b>{option.label}</b>
-              <span dangerouslySetInnerHTML={{ __html: option.text }} />
+              <span dangerouslySetInnerHTML={{ __html: formatChemHtml(option.text) }} />
             </li>
           ))}
         </ul>
@@ -720,7 +916,7 @@ function ChoiceInput({ question, answers, submitted, onAnswer }: { question: Qui
                     onClick={() => pick(option.label)}
                   >
                     <span className="option-label">{option.label}</span>
-                    <span className="option-text" dangerouslySetInnerHTML={{ __html: option.text }} />
+                    <span className="option-text" dangerouslySetInnerHTML={{ __html: formatChemHtml(option.text) }} />
                   </button>
                 ))}
               </div>
@@ -760,6 +956,13 @@ function AnswerReview({ question, progressAnswers, autoCorrect }: { question: Qu
       .filter((text): text is string => Boolean(text))
     return `${letters.join('、')}${texts.length ? `（${texts.join('；')}）` : ''}`
   }
+  const describeAnswer = (value: string) => {
+    if (question.type === 'judge') {
+      if (value === '√') return 'A 对'
+      if (value === '×') return 'B 错'
+    }
+    return describeChoice(value)
+  }
   return (
     <section className={`answer-review ${reviewState}`}>
       <div className="answer-review-title">
@@ -769,8 +972,8 @@ function AnswerReview({ question, progressAnswers, autoCorrect }: { question: Qu
       {question.slots.map((slot, index) => (
         <div key={slot.id} className="answer-line">
           <span>空 {index + 1}</span>
-          <p>你的答案：{progressAnswers[slot.id] ? describeChoice(progressAnswers[slot.id]) : '未填写'}</p>
-          <strong>参考答案：{describeChoice(slot.answer)}</strong>
+          <p>你的答案：<span dangerouslySetInnerHTML={{ __html: progressAnswers[slot.id] ? formatChemHtml(question.type === 'choice' ? describeAnswer(progressAnswers[slot.id]) : escapeHtml(describeAnswer(progressAnswers[slot.id]))) : '未填写' }} /></p>
+          <strong dangerouslySetInnerHTML={{ __html: `参考答案：${formatChemHtml(describeAnswer(slot.answer))}` }} />
         </div>
       ))}
       {question.type === 'visual' && <p className="visual-note">请打开“原答案”图片查看本页完整解析。</p>}
@@ -780,10 +983,255 @@ function AnswerReview({ question, progressAnswers, autoCorrect }: { question: Qu
           : question.type === 'choice'
           ? '选择题按选项字母自动判分；多选题漏选、错选都算错。'
           : question.type === 'judge'
-            ? '判断题按原答案的 √ / × 自动判分。'
+            ? '判断题按 A 对 / B 错自动判分。'
             : '填空题按关键词判定；化学式、图表和长答案请以原答案图为准。'}
       </p>
     </section>
+  )
+}
+
+function ProfileScreen({
+  users,
+  activeUser,
+  overridesCount,
+  githubToken,
+  onSwitchUser,
+  onAddUser,
+  onChangeRole,
+  onGithubTokenChange,
+  onClearOverrides,
+}: {
+  users: UserProfile[]
+  activeUser: UserProfile
+  overridesCount: number
+  githubToken: string
+  onSwitchUser: (userId: string) => void
+  onAddUser: (name: string, role?: UserRole) => void
+  onChangeRole: (userId: string, role: UserRole) => void
+  onGithubTokenChange: (value: string) => void
+  onClearOverrides: () => void
+}) {
+  const [newName, setNewName] = useState('')
+  const [adminCode, setAdminCode] = useState('')
+  const [adminError, setAdminError] = useState('')
+
+  function addNewUser() {
+    if (!newName.trim()) return
+    onAddUser(newName)
+    setNewName('')
+  }
+
+  function unlockAdmin() {
+    if (!isAdminCode(adminCode)) {
+      setAdminError('管理员口令不正确')
+      return
+    }
+    onChangeRole(activeUser.id, 'admin')
+    setAdminCode('')
+    setAdminError('')
+  }
+
+  return (
+    <section className="section-block profile-screen">
+      <div className="profile-hero">
+        <span className="profile-avatar">{activeUser.name.slice(0, 1)}</span>
+        <div>
+          <span className="section-kicker">CURRENT USER</span>
+          <h2>{activeUser.name}</h2>
+          <span className={`role-badge ${activeUser.role}`}>{activeUser.role === 'admin' ? '管理员' : '学生'}</span>
+        </div>
+      </div>
+
+      <div className="section-heading compact">
+        <div><span className="section-kicker">USERS</span><h2>切换用户</h2></div>
+      </div>
+      <div className="user-list">
+        {users.map((user) => (
+          <button
+            key={user.id}
+            className={user.id === activeUser.id ? 'active' : ''}
+            onClick={() => onSwitchUser(user.id)}
+          >
+            <span className="user-initial">{user.name.slice(0, 1)}</span>
+            <span><strong>{user.name}</strong><small>{user.role === 'admin' ? '管理员' : '学生'} · 独立学习进度</small></span>
+            {user.id === activeUser.id && <Check size={18} />}
+          </button>
+        ))}
+      </div>
+      <div className="inline-form">
+        <input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="新增用户昵称" />
+        <button className="secondary-button" onClick={addNewUser}><UserPlus size={17} />新增</button>
+      </div>
+
+      <div className="section-heading compact">
+        <div><span className="section-kicker">ADMIN</span><h2>管理员权限</h2></div>
+      </div>
+      {activeUser.role === 'admin' ? (
+        <div className="admin-panel">
+          <div className="admin-status"><Check size={18} /><span>当前用户可编辑任意题目</span></div>
+          <label>
+            <span>GitHub 同步令牌</span>
+            <input
+              type="password"
+              value={githubToken}
+              onChange={(event) => onGithubTokenChange(event.target.value)}
+              placeholder="仅保存在本机，用于同步给所有用户"
+            />
+          </label>
+          <p>令牌需要 `huxintingdexue/chem-quiz-app` 的 Contents 读写权限。不填写也可以先用“保存到本机”。</p>
+          <div className="admin-actions">
+            <span>本机题目修正：{overridesCount} 道</span>
+            <button className="text-button danger" disabled={!overridesCount} onClick={onClearOverrides}><Trash2 size={16} />清除修正</button>
+          </div>
+        </div>
+      ) : (
+        <div className="admin-panel">
+          <label>
+            <span>管理员口令</span>
+            <input
+              type="password"
+              value={adminCode}
+              onChange={(event) => setAdminCode(event.target.value)}
+              placeholder="输入后开启题目编辑"
+            />
+          </label>
+          {adminError && <p className="form-error">{adminError}</p>}
+          <button className="secondary-button wide" onClick={unlockAdmin}><Pencil size={17} />开启管理员模式</button>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function QuestionEditor({
+  question,
+  githubToken,
+  onGithubTokenChange,
+  onClose,
+  onSave,
+}: {
+  question: QuizQuestion
+  githubToken: string
+  onGithubTokenChange: (value: string) => void
+  onClose: () => void
+  onSave: (question: QuizQuestion, publish: boolean) => Promise<void>
+}) {
+  const [draft, setDraft] = useState<QuizQuestion>(() => structuredClone(question))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  function updateSlot(slotId: string, answer: string) {
+    setDraft((current) => ({
+      ...current,
+      slots: current.slots.map((slot) => (slot.id === slotId ? { ...slot, answer } : slot)),
+    }))
+  }
+
+  function updateOption(label: string, text: string) {
+    setDraft((current) => ({
+      ...current,
+      options: current.options?.map((option) => (option.label === label ? { ...option, text } : option)),
+    }))
+  }
+
+  async function save(publish: boolean) {
+    setBusy(true)
+    setError('')
+    try {
+      await onSave(draft, publish)
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '保存失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="editor-backdrop" onClick={busy ? undefined : onClose}>
+      <section className="editor-sheet" onClick={(event) => event.stopPropagation()}>
+        <header className="editor-header">
+          <div><span className="section-kicker">ADMIN EDITOR</span><h2>编辑题目</h2></div>
+          <button className="icon-button" disabled={busy} onClick={onClose} aria-label="关闭编辑器"><X size={22} /></button>
+        </header>
+        <div className="editor-body">
+          <div className="editor-id">{draft.id} · 第 {draft.pageNumber} 页</div>
+          <label>
+            <span>题型</span>
+            <select value={draft.type} onChange={(event) => setDraft((current) => ({ ...current, type: event.target.value as QuizQuestion['type'] }))}>
+              <option value="choice">选择题</option>
+              <option value="judge">判断题</option>
+              <option value="fill">填空题</option>
+              <option value="visual">原图题</option>
+            </select>
+          </label>
+          <label>
+            <span>题干 HTML</span>
+            <textarea value={draft.promptHtml} onChange={(event) => setDraft((current) => ({ ...current, promptHtml: event.target.value }))} rows={6} />
+          </label>
+          <label>
+            <span>题干纯文本</span>
+            <textarea value={draft.plain} onChange={(event) => setDraft((current) => ({ ...current, plain: event.target.value }))} rows={3} />
+          </label>
+          <details className="editor-advanced">
+            <summary>上下文与分类</summary>
+            <label>
+              <span>上下文 HTML</span>
+              <textarea value={draft.contextHtml} onChange={(event) => setDraft((current) => ({ ...current, contextHtml: event.target.value }))} rows={4} />
+            </label>
+            <label>
+              <span>分类</span>
+              <input value={draft.section} onChange={(event) => setDraft((current) => ({ ...current, section: event.target.value }))} />
+            </label>
+          </details>
+
+          <div className="editor-section-title"><span>参考答案</span><small>{draft.slots.length} 个空</small></div>
+          {draft.slots.map((slot, index) => (
+            <label key={slot.id} className="answer-field">
+              <span>空 {index + 1}</span>
+              {draft.type === 'judge' ? (
+                <select value={slot.answer} onChange={(event) => updateSlot(slot.id, event.target.value)}>
+                  <option value="√">A 对</option>
+                  <option value="×">B 错</option>
+                </select>
+              ) : (
+                <input value={slot.answer} onChange={(event) => updateSlot(slot.id, event.target.value)} />
+              )}
+            </label>
+          ))}
+
+          {draft.options?.length ? (
+            <>
+              <div className="editor-section-title"><span>选项</span><small>{draft.options.length} 项</small></div>
+              {draft.options.map((option) => (
+                <label key={option.label} className="answer-field option-field">
+                  <span>{option.label}</span>
+                  <input value={option.text} onChange={(event) => updateOption(option.label, event.target.value)} />
+                </label>
+              ))}
+            </>
+          ) : null}
+
+          <details className="editor-advanced sync-panel">
+            <summary><CloudUpload size={16} />同步到所有用户</summary>
+            <label>
+              <span>GitHub 同步令牌</span>
+              <input
+                type="password"
+                value={githubToken}
+                onChange={(event) => onGithubTokenChange(event.target.value)}
+                placeholder="Fine-grained token · Contents 读写"
+              />
+            </label>
+            <p>“保存到本机”会立即生效；“保存并同步”会更新 GitHub 题库，部署后其他用户也能看到。</p>
+          </details>
+          {error && <p className="form-error">{error}</p>}
+        </div>
+        <footer className="editor-footer">
+          <button className="secondary-button" disabled={busy} onClick={() => save(false)}><Save size={17} />保存到本机</button>
+          <button className="primary-button" disabled={busy || !githubToken.trim()} onClick={() => save(true)}><CloudUpload size={17} />保存并同步</button>
+        </footer>
+      </section>
+    </div>
   )
 }
 
@@ -837,6 +1285,19 @@ function typeLabel(type: QuizQuestion['type']): string {
   if (type === 'choice') return '选择题'
   if (type === 'visual') return '原图题'
   return '填空题'
+}
+
+function questionContext(question: QuizQuestion): string {
+  const context = question.contextHtml.trim()
+  if (!context) return ''
+  const plain = context.replace(/<[^>]+>/g, '').trim()
+  if (question.type === 'judge' && /^[√×]+$/.test(plain)) return ''
+  return formatChemHtml(context)
+}
+
+function formatJudgePromptPart(value: string): string {
+  const normalized = value.replace(/填\s*[“"]?√[”"]?\s*或\s*[“"]?×[”"]?/g, '选“A 对”或“B 错”')
+  return formatChemHtml(normalized)
 }
 
 function calculateStreak(days: string[]): number {

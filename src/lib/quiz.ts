@@ -128,9 +128,9 @@ export function chapterStats(chapter: BankChapter, progress: QuizProgress) {
   }
 }
 
-export function loadProgress(): QuizProgress {
+export function loadProgress(storageKey = STORAGE_KEY): QuizProgress {
   try {
-    const value = localStorage.getItem(STORAGE_KEY)
+    const value = localStorage.getItem(storageKey)
     if (!value) return EMPTY_PROGRESS
     const parsed = JSON.parse(value) as Partial<QuizProgress>
     return {
@@ -144,8 +144,8 @@ export function loadProgress(): QuizProgress {
   }
 }
 
-export function saveProgress(progress: QuizProgress): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(progress))
+export function saveProgress(progress: QuizProgress, storageKey = STORAGE_KEY): void {
+  localStorage.setItem(storageKey, JSON.stringify(progress))
 }
 
 export function applyAttempt(
