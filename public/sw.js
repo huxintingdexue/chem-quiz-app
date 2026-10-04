@@ -1,4 +1,5 @@
-const CACHE_VERSION = 'chem-quiz-v2'
+const CACHE_VERSION = 'chem-quiz-v3'
+const NETWORK_FIRST = [/question-bank\/bank\.json$/]
 const scopeUrl = new URL('./', self.registration.scope)
 const shellUrls = [
   new URL('./', scopeUrl).href,
@@ -39,6 +40,21 @@ self.addEventListener('fetch', (event) => {
           return response
         })
         .catch(() => caches.match(request).then((cached) => cached || caches.match(new URL('./index.html', scopeUrl).href))),
+    )
+    return
+  }
+
+  if (NETWORK_FIRST.some((pattern) => pattern.test(url.pathname))) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok) {
+            const copy = response.clone()
+            caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy))
+          }
+          return response
+        })
+        .catch(() => caches.match(request)),
     )
     return
   }

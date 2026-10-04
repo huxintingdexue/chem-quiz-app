@@ -56,6 +56,7 @@ const BLANK_ID_PATTERN = /data-blank-id="([^"]+)"/
 
 function App() {
   const [bank, setBank] = useState<QuestionBank | null>(null)
+  const [loadedAt, setLoadedAt] = useState<number | null>(null)
   const [loadError, setLoadError] = useState('')
   const [tab, setTab] = useState<Tab>('home')
   const [progress, setProgress] = useState<QuizProgress>(() => loadProgress())
@@ -73,7 +74,10 @@ function App() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         return response.json() as Promise<QuestionBank>
       })
-      .then(setBank)
+      .then((data) => {
+        setBank(data)
+        setLoadedAt(Date.now())
+      })
       .catch((error: unknown) => setLoadError(error instanceof Error ? error.message : '题库加载失败'))
   }, [])
 
@@ -278,6 +282,7 @@ function App() {
             completed={completedCount}
             total={questions.length}
             accuracy={overallAccuracy}
+            loadedAt={loadedAt}
           />
         )}
       </main>
@@ -460,8 +465,41 @@ function ReviewScreen({
   )
 }
 
-function StatsScreen({ bank, progress, completed, total, accuracy }: { bank: QuestionBank; progress: QuizProgress; completed: number; total: number; accuracy: number }) {
+async function clearCachesAndUpdate() {
+  try {
+    if (typeof caches !== 'undefined') {
+      const keys = await caches.keys()
+      await Promise.all(keys.map((key) => caches.delete(key)))
+    }
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations()
+      await Promise.all(registrations.map((registration) => registration.update()))
+    }
+  } catch {
+    // A failed cache purge should still reload so the shell can refetch.
+  }
+  window.location.reload()
+}
+
+function StatsScreen({
+  bank,
+  progress,
+  completed,
+  total,
+  accuracy,
+  loadedAt,
+}: {
+  bank: QuestionBank
+  progress: QuizProgress
+  completed: number
+  total: number
+  accuracy: number
+  loadedAt: number | null
+}) {
   const percent = total ? Math.round((completed / total) * 100) : 0
+  const loadedLabel = loadedAt
+    ? new Date(loadedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    : '--'
   return (
     <section className="section-block stats-screen">
       <div className="stat-overview">
@@ -499,6 +537,15 @@ function StatsScreen({ bank, progress, completed, total, accuracy }: { bank: Que
           })}
         </div>
         <p>连续学习 {calculateStreak(progress.activeDays)} 天</p>
+      </div>
+      <div className="content-freshness">
+        <div>
+          <strong>题库 {total} 题 · {bank.chapters.length} 章</strong>
+          <span>内容加载于 {loadedLabel}</span>
+        </div>
+        <button className="secondary-button" onClick={clearCachesAndUpdate}>
+          <RefreshCcw size={16} />检查更新
+        </button>
       </div>
     </section>
   )
